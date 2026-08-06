@@ -245,6 +245,12 @@ h1 {
   object-fit: contain;
   object-position: center;
   background: #eef4f3;
+  opacity: 1;
+  transition: opacity 140ms ease;
+}
+
+.picture-button img.is-loading {
+  opacity: 0;
 }
 
 .replay-hint {

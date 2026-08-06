@@ -7,6 +7,7 @@
     reviewStarted: false,
     autoRunning: false,
     runId: 0,
+    imageRunId: 0,
     audio: null,
     finishAudio: null,
   };
@@ -15,6 +16,10 @@
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const delay = (milliseconds) =>
     new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  const nextPaint = () =>
+    new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    });
 
   $$("[data-total]").forEach((node) => {
     node.textContent = String(items.length);
@@ -53,11 +58,51 @@
   }
 
   function imagePath(item) {
-    return `assets/images/${item.slug}.webp?v=20260806-discover2-hires-dtw-u5`;
+    return `assets/images/${item.slug}.webp?v=20260806-image-first`;
   }
 
   function audioPath(item) {
     return `assets/audio/${item.slug}.mp3`;
+  }
+
+  function waitForImageLoad(image) {
+    if (image.complete) return Promise.resolve(image.naturalWidth > 0);
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (loaded) => {
+        if (settled) return;
+        settled = true;
+        image.removeEventListener("load", onLoad);
+        image.removeEventListener("error", onError);
+        window.clearTimeout(timeout);
+        resolve(loaded);
+      };
+      const onLoad = () => finish(true);
+      const onError = () => finish(false);
+      const timeout = window.setTimeout(() => finish(false), 8_000);
+
+      image.addEventListener("load", onLoad, { once: true });
+      image.addEventListener("error", onError, { once: true });
+    });
+  }
+
+  async function showLearnImage(item) {
+    const image = $("#learnImage");
+    const requestId = ++state.imageRunId;
+    image.classList.add("is-loading");
+    image.alt = item.word;
+    image.src = imagePath(item);
+
+    const loaded = await waitForImageLoad(image);
+    if (loaded && typeof image.decode === "function") {
+      await image.decode().catch(() => {});
+    }
+    if (requestId !== state.imageRunId) return false;
+
+    image.classList.remove("is-loading");
+    await nextPaint();
+    return loaded;
   }
 
   function renderDots() {
@@ -80,8 +125,7 @@
 
   function renderLearn() {
     const item = itemAt(state.learnIndex);
-    $("#learnImage").src = imagePath(item);
-    $("#learnImage").alt = item.word;
+    const imageReady = showLearnImage(item);
     $("#word").textContent = item.word;
     $("#ipa").textContent = item.ipa;
     $("#meaning").textContent = item.meaning;
@@ -90,6 +134,7 @@
     $("#learnNumber").textContent = String(state.learnIndex + 1);
     $("#learnProgress").style.width = `${((state.learnIndex + 1) / items.length) * 100}%`;
     renderDots();
+    return imageReady;
   }
 
   function playCurrent() {
@@ -133,7 +178,14 @@
     for (let offset = 0; offset < items.length; offset += 1) {
       if (token !== state.runId) return;
       state.learnIndex = (startIndex + offset) % items.length;
-      renderLearn();
+      const imageReady = renderLearn();
+      const imageShown = await imageReady;
+      if (token !== state.runId) return;
+      if (!imageShown) {
+        $("#statusText").textContent = "Không tải được ảnh";
+        break;
+      }
+      await delay(500);
       const played = await playCurrent();
       if (!played || token !== state.runId) break;
       await delay(850);
